@@ -739,6 +739,9 @@ int is_network(section *s)
             || strcmp(s->type, "[network]")==0);
 }
 
+/**
+* 解析配置文件，返回网络
+*/
 network *parse_network_cfg(char *filename)
 {
     list *sections = read_cfg(filename);
