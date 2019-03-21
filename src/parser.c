@@ -36,6 +36,7 @@
 #include "softmax_layer.h"
 #include "lstm_layer.h"
 #include "utils.h"
+#include "yolov3.h"  // 生成配置
 
 typedef struct{
     char *type;
@@ -43,6 +44,7 @@ typedef struct{
 }section;
 
 list *read_cfg(char *filename);
+list *read_cfg_from_header();
 
 LAYER_TYPE string_to_layer_type(char * type)
 {
@@ -744,7 +746,7 @@ int is_network(section *s)
 */
 network *parse_network_cfg(char *filename)
 {
-    list *sections = read_cfg(filename);
+    list *sections = read_cfg_from_header();//read_cfg(filename);
     node *n = sections->front;
     if(!n) error("Config file has no sections");
     network *net = make_network(sections->size - 1);
@@ -928,6 +930,50 @@ list *read_cfg(char *filename)
     fclose(file);
     return options; //返回list指针，其值指向一个section,section包含type和具体的配置信息
 }
+
+/*
+ 读配置字符串，得到配置信息
+*/
+list *read_cfg_from_header()
+{
+    char *cfg = 0;
+    int len = strlen(config_str);
+    cfg = malloc(len*sizeof(char));
+    sprintf(cfg, "%s", config_str);
+
+    char *line;
+    int nu = 0;
+    line = strtok(cfg, "$");
+    list *options = make_list();
+    section *current = 0;
+    while(line != NULL){ // 一行一行读配置文件
+        ++ nu;  // 行计数
+        strip(line);  // 去除一行的前后空格
+        switch(line[0]){  // 形如[convolutional]这样的配置行，先申请一个section结构提内存，此结构包含类别和链表
+            case '[':
+                current = malloc(sizeof(section));
+                list_insert(options, current);
+                current->options = make_list();
+                current->type = line;
+                break;
+            case '\0': //如果一行开头字符包含如下，释放不处理，这是对注释行的处理办法 
+            case '#':
+            case ';':
+                free(line);
+                break;
+            default:
+                if(!read_option(line, current->options)){
+                    fprintf(stderr, "Config file error line %d, could parse: %s\n", nu, line);
+                    free(line);
+                }
+                break;
+        }
+        line = strtok(NULL, "$");
+    }
+    free(cfg);
+    return options; //返回list指针，其值指向一个section,section包含type和具体的配置信息
+}
+
 
 void save_convolutional_weights_binary(layer l, FILE *fp)
 {

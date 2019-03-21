@@ -65,7 +65,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     //args.type = INSTANCE_DATA;
     args.threads = 64;  // 64个线程
 
-    pthread_t load_thread = load_data(args); // 创建线程
+    pthread_t load_thread = load_data(args); // 创建线程，加载数据
     double time;
     int count = 0;
     //while(i*imgs < N*120){
@@ -571,12 +571,12 @@ void validate_detector_recall(char *cfgfile, char *weightfile)
 
 void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filename, float thresh, float hier_thresh, char *outfile, int fullscreen)
 {
-    list *options = read_data_cfg(datacfg);  // 需要改动的地方
+    list *options = read_data_cfg(datacfg); 
     char *name_list = option_find_str(options, "names", "data/names.list");
     char **names = get_labels(name_list);
 
     image **alphabet = load_alphabet();
-    network *net = load_network(cfgfile, weightfile, 0); // 需要改动的地方
+    network *net = load_network(cfgfile, weightfile, 0); 
     set_batch_network(net, 1);
     srand(2222222);
     double time;
