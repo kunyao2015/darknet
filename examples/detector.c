@@ -9,53 +9,63 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     char *train_images = option_find_str(options, "train", "data/train.list");
     char *backup_directory = option_find_str(options, "backup", "/backup/");
 
-    srand(time(0));
-    char *base = basecfg(cfgfile);
+    srand(time(0)); // 设置随机种子
+    char *base = basecfg(cfgfile);  //这一句的作用在于提取配置文件的名称（“.”之前的部分）
     printf("%s\n", base);
     float avg_loss = -1;
-    network **nets = calloc(ngpus, sizeof(network));
+    network **nets = calloc(ngpus, sizeof(network));  // 用于为网络分配内存空间。network的定义为darknet.h中。为每个gpu分配一个network。
 
     srand(time(0));
     int seed = rand();
     int i;
-    for(i = 0; i < ngpus; ++i){
+    for(i = 0; i < ngpus; ++i){  // ngpus gpu个数， gpus gpu的代号 0,1,2,3等
         srand(seed);
 #ifdef GPU
         cuda_set_device(gpus[i]);
 #endif
-        nets[i] = load_network(cfgfile, weightfile, clear);
+        nets[i] = load_network(cfgfile, weightfile, clear); // load_weights函数用于加载预训练参数。
         nets[i]->learning_rate *= ngpus;
     }
     srand(time(0));
     network *net = nets[0];
 
-    int imgs = net->batch * net->subdivisions * ngpus;
+    int imgs = net->batch * net->subdivisions * ngpus;  // imgs可能是图片的总张数。
     printf("Learning Rate: %g, Momentum: %g, Decay: %g\n", net->learning_rate, net->momentum, net->decay);
-    data train, buffer;
+    /*
+    typedef struct{
+    int w, h;
+    matrix X;
+    matrix y;
+    int shallow;
+    int *num_boxes;
+    box **boxes;
+} data;   data结构体，定义于darknet.h中
+    */
+    data train, buffer;  
 
-    layer l = net->layers[net->n - 1];
+    layer l = net->layers[net->n - 1];  // net->n代表网络的总层数，net->layers[net->n-1]代表网络最后一层，net从0开始计数。
 
-    int classes = l.classes;
-    float jitter = l.jitter;
+    int classes = l.classes;  // 类别数
+    float jitter = l.jitter;  //     通过抖动增加噪声来抑制过拟合
 
-    list *plist = get_paths(train_images);
+    list *plist = get_paths(train_images); //get_paths将train_images文件中的训练数据转化为list，train_images文件为txt格式，存储的是所有训练数据存储的地址。
     //int N = plist->size;
-    char **paths = (char **)list_to_array(plist);
+    char **paths = (char **)list_to_array(plist);  // list_to_array将list转化为二维字符矩阵，用于存储训练数据存储的地址。
 
     load_args args = get_base_args(net);
     args.coords = l.coords;
     args.paths = paths;
     args.n = imgs;
-    args.m = plist->size;
-    args.classes = classes;
-    args.jitter = jitter;
+    args.m = plist->size; // 总图像个数
+    args.classes = classes; // 类别个数
+    args.jitter = jitter;  // 抖动参数
     args.num_boxes = l.max_boxes;
     args.d = &buffer;
     args.type = DETECTION_DATA;
     //args.type = INSTANCE_DATA;
-    args.threads = 64;
+    args.threads = 64;  // 64个线程
 
-    pthread_t load_thread = load_data(args);
+    pthread_t load_thread = load_data(args); // 创建线程
     double time;
     int count = 0;
     //while(i*imgs < N*120){
@@ -561,12 +571,12 @@ void validate_detector_recall(char *cfgfile, char *weightfile)
 
 void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filename, float thresh, float hier_thresh, char *outfile, int fullscreen)
 {
-    list *options = read_data_cfg(datacfg);
+    list *options = read_data_cfg(datacfg);  // 需要改动的地方
     char *name_list = option_find_str(options, "names", "data/names.list");
     char **names = get_labels(name_list);
 
     image **alphabet = load_alphabet();
-    network *net = load_network(cfgfile, weightfile, 0);
+    network *net = load_network(cfgfile, weightfile, 0); // 需要改动的地方
     set_batch_network(net, 1);
     srand(2222222);
     double time;

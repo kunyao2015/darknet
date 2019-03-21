@@ -180,13 +180,13 @@ char *basecfg(char *cfgfile)
 {
     char *c = cfgfile;
     char *next;
-    while((next = strchr(c, '/')))
+    while((next = strchr(c, '/'))) //  strchr返回第一次遇到/的地址给next 如C:/dd/ss.exe 则返回/dd/ss.exe
     {
-        c = next+1;
+        c = next+1;  //  进一位，去掉第一个/，即dd/ss.exe ,如此循环
     }
-    c = copy_string(c);
-    next = strchr(c, '.');
-    if (next) *next = 0;
+    c = copy_string(c);  //复制一个c,即申请一个新的内存保存原字符串
+    next = strchr(c, '.'); //next = .exe 或者为0
+    if (next) *next = 0; // 如果存在后缀，则将之至0,则原来的c只剩ss
     return c;
 }
 

@@ -135,7 +135,18 @@ matrix load_image_augment_paths(char **paths, int n, int min, int max, int size,
     return X;
 }
 
+// 读取标注数据
+// 标注的数据格式
+/*
+每张图片对应一个.txt的label文件，文件格式如下：
 
+<object-class> <x> <y> <width> <height>
+
+
+object-class是类的索引，后面的4个值都是相对于整张图片的比例。
+
+x是ROI中心的x坐标，y是ROI中心的y坐标，width是ROI的宽，height是ROI的高。
+*/
 box_label *read_boxes(char *filename, int *n)
 {
     FILE *file = fopen(filename, "r");
@@ -144,12 +155,20 @@ box_label *read_boxes(char *filename, int *n)
     int id;
     int count = 0;
     int size = 64;
+    /*
+    typedef struct{
+    int id;
+    float x,y,w,h;
+    float left, right, top, bottom;
+} box_label;
+    */
     box_label *boxes = calloc(size, sizeof(box_label));
     while(fscanf(file, "%d %f %f %f %f", &id, &x, &y, &w, &h) == 5){
         if(count == size) {
             size = size * 2;
             boxes = realloc(boxes, size*sizeof(box_label));
         }
+        // 同时x、y、w、h需要注意是归一化后的结果。在生成标注文件时候已归一化了
         boxes[count].id = id;
         boxes[count].x = x;
         boxes[count].y = y;
@@ -447,16 +466,20 @@ void fill_truth_mask(char *path, int num_boxes, float *truth, int classes, int w
 void fill_truth_detection(char *path, int num_boxes, float *truth, int classes, int flip, float dx, float dy, float sx, float sy)
 {
     char labelpath[4096];
-    find_replace(path, "images", "labels", labelpath);
+    find_replace(path, "images", "labels", labelpath);  // 查找并替换，即查找path的‘images'字符串，找到则替换为‘labels’，并保存在labelpath，找不到，直接赋值path
     find_replace(labelpath, "JPEGImages", "labels", labelpath);
 
     find_replace(labelpath, "raw", "labels", labelpath);
+    // 从以上代码可以知道，图片可以存放在images、JPEGImages、raw路径下，上述路径会被替换为labels。上述代码同时说明标签文件需要放置在labels文件夹下。
     find_replace(labelpath, ".jpg", ".txt", labelpath);
     find_replace(labelpath, ".png", ".txt", labelpath);
     find_replace(labelpath, ".JPG", ".txt", labelpath);
     find_replace(labelpath, ".JPEG", ".txt", labelpath);
+    // 上述代码的功能是将*.jpg/png/JPG/JPEG替换为*.txt，同时表明darknet仅支持jpg与png两种格式。
+
     int count = 0;
-    box_label *boxes = read_boxes(labelpath, &count);
+    box_label *boxes = read_boxes(labelpath, &count); //  读取标注信息
+    // randomize_boxes随机交换标注数据顺序，correct_boxes根据图片调整比例，调整标注框的大小。
     randomize_boxes(boxes, count);
     correct_boxes(boxes, count, dx, dy, sx, sy, flip);
     if(count > num_boxes) count = num_boxes;
@@ -464,6 +487,7 @@ void fill_truth_detection(char *path, int num_boxes, float *truth, int classes, 
     int id;
     int i;
     int sub = 0;
+    // 若标注数量大于num_boxes则将count设为num_boxes，表明会随机的丢弃一些标注框。仅取前num_boxes个框，因此需要调用randomize_boxes函数，调整标注框的顺序。
 
     for (i = 0; i < count; ++i) {
         x =  boxes[i].x;
@@ -1035,24 +1059,33 @@ data load_data_swag(char **paths, int n, int classes, float jitter)
 
 data load_data_detection(int n, char **paths, int m, int w, int h, int boxes, int classes, float jitter, float hue, float saturation, float exposure)
 {
+    // 其中paths为所有训练数据集保存地址，n为16，m为训练数据集长度。通过上述程序可以得到随机的n个训练数据集地址。
+
+     //共有64个线程，每个线程16个地址，因此共1024个训练数据集地址。
     char **random_paths = get_random_paths(paths, n, m);
     int i;
     data d = {0};
     d.shallow = 0;
 
+/*
+d用于存储训练数据集及其对应标签。rows代表每个线程处理的数据，cols用于存储图像大小，但此处是h×w×3，而不是h×w×channel，是不是darknet仅能处理3通道图像？
+
+d.y用于存储标签，make_matrix位于matrix.c文件中，n代表训练数据数量，5代表5个维度的结果，分别为（label，x1，y1，x2，y2），boxes应该为9，但其代表的具体含义尚不清楚。
+*/
     d.X.rows = n;
     d.X.vals = calloc(d.X.rows, sizeof(float*));
     d.X.cols = h*w*3;
 
     d.y = make_matrix(n, 5*boxes);
     for(i = 0; i < n; ++i){
-        image orig = load_image_color(random_paths[i], 0, 0);
-        image sized = make_image(w, h, orig.c);
-        fill_image(sized, .5);
+        image orig = load_image_color(random_paths[i], 0, 0); // 参数 0, 0 表示不改变原图大小， 已经做了归一化处理/255
+        image sized = make_image(w, h, orig.c);  // 申请一个空的图像数据空间
+        fill_image(sized, .5); // 全部填0.5
 
         float dw = jitter * orig.w;
-        float dh = jitter * orig.h;
+        float dh = jitter * orig.h;  // 据yolov3-voc.cfg配置，width为416，height为416。因此orig.w为416，orig.h为416。jitter为0.3，因此dw、dh为124.8。
 
+        // rand_uniform位于util.c文件中，用于生成max与min之间的一个随机数，此处为了分析代码方便，设置第一个产生的随机数为5，第二个产生的随机数为10，因此new_ar为0.9629。
         float new_ar = (orig.w + rand_uniform(-dw, dw)) / (orig.h + rand_uniform(-dh, dh));
         //float scale = rand_uniform(.25, 2);
         float scale = 1;
@@ -1070,15 +1103,16 @@ data load_data_detection(int n, char **paths, int m, int w, int h, int boxes, in
         float dx = rand_uniform(0, w - nw);
         float dy = rand_uniform(0, h - nh);
 
-        place_image(orig, nw, nh, dx, dy, sized);
+        place_image(orig, nw, nh, dx, dy, sized);  // place_image的作用不是特别清楚，看了一个大概，觉得是将原图的一部分放到sized上。
 
-        random_distort_image(sized, hue, saturation, exposure);
+        random_distort_image(sized, hue, saturation, exposure);  // 这一句的作用是做随机变换。
 
         int flip = rand()%2;
-        if(flip) flip_image(sized);
+        if(flip) flip_image(sized); // 翻转
         d.X.vals[i] = sized.data;
 
 
+        // fill_truth_detection的作用是读取图片对应的标注信息。
         fill_truth_detection(random_paths[i], boxes, d.y.vals[i], classes, flip, -dx/w, -dy/h, nw/w, nh/h);
 
         free_image(orig);
@@ -1144,22 +1178,23 @@ pthread_t load_data_in_thread(load_args args)
 void *load_threads(void *ptr)
 {
     int i;
-    load_args args = *(load_args *)ptr;
-    if (args.threads == 0) args.threads = 1;
+    load_args args = *(load_args *)ptr; // 得到指针的指向值
+    if (args.threads == 0) args.threads = 1; // 默认64
     data *out = args.d;
     int total = args.n;
     free(ptr);
-    data *buffers = calloc(args.threads, sizeof(data));
+    data *buffers = calloc(args.threads, sizeof(data));  // 共为64个data数据结构分配内存。
     pthread_t *threads = calloc(args.threads, sizeof(pthread_t));
     for(i = 0; i < args.threads; ++i){
+        // args.d分别指向64个预先分配的内存空间。total为net->batch * net->subdivisions * ngpus，在本程序中为64*16*1=1024，arg.n为16，进入load_data_in_thread函数。
         args.d = buffers + i;
         args.n = (i+1) * total/args.threads - i * total/args.threads;
-        threads[i] = load_data_in_thread(args);
+        threads[i] = load_data_in_thread(args);   // 因此共调用load_data_in_thread 64次，结合pthread_join，可以知道load_data_in_thread创建了64个线程。
     }
     for(i = 0; i < args.threads; ++i){
-        pthread_join(threads[i], 0);
+        pthread_join(threads[i], 0);   // 此处调用pthread_join等待数据加载完成。
     }
-    *out = concat_datas(buffers, args.threads);
+    *out = concat_datas(buffers, args.threads);    // concat_datas的作用是将加载的数据整合到一起。最后释放资源。
     out->shallow = 0;
     for(i = 0; i < args.threads; ++i){
         buffers[i].shallow = 1;

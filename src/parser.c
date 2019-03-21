@@ -891,6 +891,9 @@ network *parse_network_cfg(char *filename)
     return net;
 }
 
+/**
+* 读配置文件，返回链表
+*/
 list *read_cfg(char *filename)
 {
     FILE *file = fopen(filename, "r");
@@ -899,17 +902,17 @@ list *read_cfg(char *filename)
     int nu = 0;
     list *options = make_list();
     section *current = 0;
-    while((line=fgetl(file)) != 0){
-        ++ nu;
-        strip(line);
-        switch(line[0]){
+    while((line=fgetl(file)) != 0){ // 一行一行读配置文件
+        ++ nu;  // 行计数
+        strip(line);  // 去除一行的前后空格
+        switch(line[0]){  // 形如[convolutional]这样的配置行，先申请一个section结构提内存，此结构包含类别和链表
             case '[':
                 current = malloc(sizeof(section));
                 list_insert(options, current);
                 current->options = make_list();
                 current->type = line;
                 break;
-            case '\0':
+            case '\0': //如果一行开头字符包含如下，释放不处理，这是对注释行的处理办法 
             case '#':
             case ';':
                 free(line);
@@ -923,7 +926,7 @@ list *read_cfg(char *filename)
         }
     }
     fclose(file);
-    return options;
+    return options; //返回list指针，其值指向一个section,section包含type和具体的配置信息
 }
 
 void save_convolutional_weights_binary(layer l, FILE *fp)
@@ -1310,6 +1313,6 @@ void load_weights_upto(network *net, char *filename, int start, int cutoff)
 
 void load_weights(network *net, char *filename)
 {
-    load_weights_upto(net, filename, 0, net->n);
+    load_weights_upto(net, filename, 0, net->n); // net->n 网路总层数
 }
 
