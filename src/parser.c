@@ -737,6 +737,8 @@ void parse_net_options(list *options, network *net)
 
 int is_network(section *s)
 {
+    printf("%s\n", s->type);
+    printf("%d\n", strcmp(s->type, "[net]"));
     return (strcmp(s->type, "[net]")==0
             || strcmp(s->type, "[network]")==0);
 }
@@ -747,6 +749,7 @@ int is_network(section *s)
 network *parse_network_cfg(char *filename)
 {
     list *sections = read_cfg_from_header();//read_cfg(filename);
+    printf("完成！\n");
     node *n = sections->front;
     if(!n) error("Config file has no sections");
     network *net = make_network(sections->size - 1);
@@ -754,8 +757,10 @@ network *parse_network_cfg(char *filename)
     size_params params;
 
     section *s = (section *)n->val;
+    printf("%s\n", s->type);
     list *options = s->options;
     if(!is_network(s)) error("First section must be [net] or [network]");
+    printf("完成2！\n");
     parse_net_options(options, net);
 
     params.h = net->h;
@@ -936,40 +941,48 @@ list *read_cfg(char *filename)
 */
 list *read_cfg_from_header()
 {
-    char *cfg = 0;
+    
     int len = strlen(config_str);
-    cfg = malloc(len*sizeof(char));
+    printf("%d\n", len);
+    char *cfg = malloc(len*sizeof(char));
     sprintf(cfg, "%s", config_str);
+    //printf("%s\n", cfg);
+    //printf("%c\n", cfg[1]);
 
     char *line;
     int nu = 0;
     line = strtok(cfg, "$");
     list *options = make_list();
     section *current = 0;
-    while(line != NULL){ // 一行一行读配置文件
+    while(line){ // 一行一行读配置文件
         ++ nu;  // 行计数
-        strip(line);  // 去除一行的前后空格
+        strip(line);  // 去除一行的前后空格 \n \t
+        char *temp_line = malloc(strlen(line)*sizeof(char));  // ！！必须使用新申请的字符串内存块temp_line，原line会释放，从而options或者type的指针指向后面都是非法内存
+        sprintf(temp_line, "%s", line);
+        //printf("%d\n",strlen(line));
         switch(line[0]){  // 形如[convolutional]这样的配置行，先申请一个section结构提内存，此结构包含类别和链表
             case '[':
                 current = malloc(sizeof(section));
                 list_insert(options, current);
                 current->options = make_list();
-                current->type = line;
+                current->type = temp_line;  // 
+                //printf("%s\n", current->type);
                 break;
             case '\0': //如果一行开头字符包含如下，释放不处理，这是对注释行的处理办法 
             case '#':
             case ';':
-                free(line);
+                free(temp_line);
                 break;
             default:
-                if(!read_option(line, current->options)){
+                if(!read_option(temp_line, current->options)){
                     fprintf(stderr, "Config file error line %d, could parse: %s\n", nu, line);
-                    free(line);
+                    free(temp_line);
                 }
                 break;
         }
         line = strtok(NULL, "$");
     }
+    printf("长度：%d\n", strlen(cfg));
     free(cfg);
     return options; //返回list指针，其值指向一个section,section包含type和具体的配置信息
 }
