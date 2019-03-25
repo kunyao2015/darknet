@@ -13,6 +13,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     char *base = basecfg(cfgfile);  //这一句的作用在于提取配置文件的名称（“.”之前的部分）
     printf("%s\n", base);
     float avg_loss = -1;
+    // 一个gpu分配一个网络，一个网络是一个指针，所以是双指针
     network **nets = calloc(ngpus, sizeof(network));  // 用于为网络分配内存空间。network的定义为darknet.h中。为每个gpu分配一个network。
 
     srand(time(0));
@@ -24,7 +25,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
         cuda_set_device(gpus[i]);
 #endif
         nets[i] = load_network(cfgfile, weightfile, clear); // load_weights函数用于加载预训练参数。
-        nets[i]->learning_rate *= ngpus;
+        nets[i]->learning_rate *= ngpus;  // z注意这点，学习率
     }
     srand(time(0));
     network *net = nets[0];

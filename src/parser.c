@@ -982,7 +982,7 @@ list *read_cfg_from_header()
         }
         line = strtok(NULL, "$");
     }
-    printf("长度：%d\n", strlen(cfg));
+    //printf("长度：%d\n", strlen(cfg));
     free(cfg);
     return options; //返回list指针，其值指向一个section,section包含type和具体的配置信息
 }
@@ -1372,6 +1372,313 @@ void load_weights_upto(network *net, char *filename, int start, int cutoff)
 
 void load_weights(network *net, char *filename)
 {
-    load_weights_upto(net, filename, 0, net->n); // net->n 网路总层数
+    //load_weights_upto(net, filename, 0, net->n); // net->n 网路总层数
+    load_encrypt_weights(net, filename, 0, net->n);
 }
 
+/*
+加载加密后的模型
+*/
+void load_encrypt_weights(network *net, char *filename, int start, int cutoff)
+{
+#ifdef GPU
+    if(net->gpu_index >= 0){
+        cuda_set_device(net->gpu_index);
+    }
+#endif
+    fprintf(stderr, "Loading weights from %s...", filename);
+    fflush(stdout);
+    FILE *fp = fopen(filename, "rb");
+    if(!fp) file_error(filename);
+
+    fseek(fp, 0, SEEK_END);
+    long file_length = ftell(fp);
+    printf("input file length: %ld\n", file_length);
+    fseek(fp, 0, SEEK_SET);
+
+    // 从文件读数据，边读边解密，存入大字符串中
+    char *secret_key = "alibaba"; 
+    int read_count; // 每次从文件中读取的字节数
+    int key_len = strlen(secret_key);  // 密钥的长度
+    char buffer[15]; 
+
+    char *weights_data = malloc(file_length);
+    int count = 0;
+    // 先全部取出，并解密，存入
+    while( (read_count=fread(buffer, 1, key_len, fp)) > 0 ){
+        // 对buffer中的数据逐字节进行异或运算
+        for(int i=0; i<read_count; i++){
+            weights_data[count++] = buffer[i]^secret_key[i];
+        }
+    }
+    fclose(fp);
+
+    int major;
+    int minor;
+    int revision;
+    int pt = 0;
+    char temp[4] = {0};
+    /*for(int i = 0; i<12;i++){
+        print("%c\n", weights_data[i]);
+    }*/
+    for(int st=0;st < sizeof(int);st++){ 
+        temp[st] = weights_data[pt++]; 
+    }
+    memcpy(&major, temp, sizeof(int));
+    for(int st=0;st < sizeof(int);st++){ 
+        temp[st] = weights_data[pt++]; 
+    }
+    memcpy(&minor, temp, sizeof(int));
+    for(int st=0;st < sizeof(int);st++){ 
+        temp[st] = weights_data[pt++]; 
+    }
+    memcpy(&revision, temp, sizeof(int));
+    //fread(&major, sizeof(int), 1, fp);
+    //fread(&minor, sizeof(int), 1, fp);
+    //fread(&revision, sizeof(int), 1, fp);
+    if ((major*10 + minor) >= 2 && major < 1000 && minor < 1000){
+        //fread(net->seen, sizeof(size_t), 1, fp);
+        for(int st=0;st < sizeof(size_t);st++){ 
+            temp[st] = weights_data[pt++]; 
+         }
+        memcpy(net->seen, temp, sizeof(int));
+    } else {
+        int iseen = 0;
+        //fread(&iseen, sizeof(int), 1, fp);
+        for(int st=0;st < sizeof(size_t);st++){ 
+            temp[st] = weights_data[pt++]; 
+         }
+        memcpy(&iseen, temp, sizeof(int));
+        *net->seen = iseen;
+    }
+    int transpose = (major > 1000) || (minor > 1000);
+
+    int i;
+    for(i = start; i < net->n && i < cutoff; ++i){
+        layer l = net->layers[i];
+        if (l.dontload) continue;
+        if(l.type == CONVOLUTIONAL || l.type == DECONVOLUTIONAL){
+            load_convolutional_weights_from_buff(l, weights_data, &pt);
+        }
+        if(l.type == CONNECTED){
+            load_connected_weights_from_buff(l, weights_data, &pt, transpose);
+        }
+        if(l.type == BATCHNORM){
+            load_batchnorm_weights_from_buff(l, weights_data, &pt);
+        }
+        if(l.type == CRNN){
+            load_convolutional_weights_from_buff(*(l.input_layer), weights_data, &pt);
+            load_convolutional_weights_from_buff(*(l.self_layer), weights_data, &pt);
+            load_convolutional_weights_from_buff(*(l.output_layer), weights_data, &pt);
+        }
+        if(l.type == RNN){
+            load_connected_weights_from_buff(*(l.input_layer), weights_data, &pt, transpose);
+            load_connected_weights_from_buff(*(l.self_layer), weights_data, &pt, transpose);
+            load_connected_weights_from_buff(*(l.output_layer), weights_data, &pt, transpose);
+        }
+        if (l.type == LSTM) {
+            load_connected_weights_from_buff(*(l.wi), weights_data, &pt, transpose);
+            load_connected_weights_from_buff(*(l.wf), weights_data, &pt, transpose);
+            load_connected_weights_from_buff(*(l.wo), weights_data, &pt, transpose);
+            load_connected_weights_from_buff(*(l.wg), weights_data, &pt, transpose);
+            load_connected_weights_from_buff(*(l.ui), weights_data, &pt, transpose);
+            load_connected_weights_from_buff(*(l.uf), weights_data, &pt, transpose);
+            load_connected_weights_from_buff(*(l.uo), weights_data, &pt, transpose);
+            load_connected_weights_from_buff(*(l.ug), weights_data, &pt, transpose);
+        }
+        if (l.type == GRU) {
+            if(1){
+                load_connected_weights_from_buff(*(l.wz), weights_data, &pt, transpose);
+                load_connected_weights_from_buff(*(l.wr), weights_data, &pt, transpose);
+                load_connected_weights_from_buff(*(l.wh), weights_data, &pt, transpose);
+                load_connected_weights_from_buff(*(l.uz), weights_data, &pt, transpose);
+                load_connected_weights_from_buff(*(l.ur), weights_data, &pt, transpose);
+                load_connected_weights_from_buff(*(l.uh), weights_data, &pt, transpose);
+            }else{
+                load_connected_weights_from_buff(*(l.reset_layer), weights_data, &pt, transpose);
+                load_connected_weights_from_buff(*(l.update_layer), weights_data, &pt, transpose);
+                load_connected_weights_from_buff(*(l.state_layer), weights_data, &pt, transpose);
+            }
+        }
+        if(l.type == LOCAL){
+            int locations = l.out_w*l.out_h;
+            int size = l.size*l.size*l.c*l.n*locations;
+            //fread(l.biases, sizeof(float), l.outputs, fp);
+            //fread(l.weights, sizeof(float), size, fp);
+            char *temp = malloc(sizeof(float)* l.outputs);
+            char *temp2 = malloc(sizeof(float)* size);
+            for(int st=0;st < sizeof(float)* l.outputs;st++){ 
+                temp[st] = weights_data[pt++]; 
+            }
+            memcpy(l.biases, temp, sizeof(float)* l.outputs);
+
+            for(int st=0;st < sizeof(float)* size;st++){ 
+                temp2[st] = weights_data[pt++]; 
+            }
+            memcpy(l.weights, temp2, sizeof(float)* size);
+
+            free(temp);
+            free(temp2);
+#ifdef GPU
+            if(gpu_index >= 0){
+                push_local_layer(l);
+            }
+#endif
+        }
+    }
+    fprintf(stderr, "Done!\n");
+    free(weights_data);
+}
+
+
+/*
+从buff读取卷积层权重数据
+*/
+void load_convolutional_weights_from_buff(layer l, char *weights_data, int *pt)
+{
+    if(l.binary){
+        //load_convolutional_weights_binary(l, fp);
+        //return;
+    }
+    if(l.numload) l.n = l.numload;
+    int num = l.c/l.groups*l.n*l.size*l.size;
+    //fread(l.biases, sizeof(float), l.n, fp);
+    char *temp = malloc(sizeof(float)* l.n);
+    for(int st=0;st < sizeof(float)* l.n;st++){ 
+        temp[st] = weights_data[*pt]; 
+        (*pt)++;
+    }
+    memcpy(l.biases, temp, sizeof(float)* l.n);
+    if (l.batch_normalize && (!l.dontloadscales)){
+        //fread(l.scales, sizeof(float), l.n, fp);
+        for(int st=0;st < sizeof(float)* l.n;st++){ 
+            temp[st] = weights_data[*pt]; 
+            (*pt)++;
+        }
+        memcpy(l.scales, temp, sizeof(float)* l.n);
+        //fread(l.rolling_mean, sizeof(float), l.n, fp);
+        for(int st=0;st < sizeof(float)* l.n;st++){ 
+            temp[st] = weights_data[*pt]; 
+            (*pt)++;
+        }
+        memcpy(l.rolling_mean, temp, sizeof(float)* l.n);
+        //fread(l.rolling_variance, sizeof(float), l.n, fp);
+        for(int st=0;st < sizeof(float)* l.n;st++){ 
+            temp[st] = weights_data[*pt]; 
+            (*pt)++; 
+        }
+        memcpy(l.rolling_variance, temp, sizeof(float)* l.n);
+    }
+    free(temp);
+    char *temp2 = malloc(sizeof(float)* num);
+    //fread(l.weights, sizeof(float), num, fp);
+    for(int st=0;st < sizeof(float)* num;st++){ 
+            temp2[st] = weights_data[*pt]; 
+            (*pt)++;
+        }
+    memcpy(l.weights, temp2, sizeof(float)* num);
+    free(temp2);
+    //if(l.c == 3) scal_cpu(num, 1./256, l.weights, 1);
+    if (l.flipped) {
+        transpose_matrix(l.weights, l.c*l.size*l.size, l.n);
+    }
+    //if (l.binary) binarize_weights(l.weights, l.n, l.c*l.size*l.size, l.weights);
+#ifdef GPU
+    if(gpu_index >= 0){
+        push_convolutional_layer(l);
+    }
+#endif
+}
+
+/*
+从buff读取全连接层权重数据
+*/
+void load_connected_weights_from_buff(layer l, char *weights_data, int *pt, int transpose)
+{
+    //fread(l.biases, sizeof(float), l.outputs, fp);
+    char *temp = malloc(sizeof(float)* l.outputs);
+    for(int st=0;st < sizeof(float)* l.outputs;st++){ 
+            temp[st] = weights_data[*pt]; 
+            (*pt)++;
+        }
+    memcpy(l.biases, temp, sizeof(float)* l.outputs);
+    //fread(l.weights, sizeof(float), l.outputs*l.inputs, fp);
+    char *temp2 = malloc(sizeof(float)* l.outputs*l.inputs);
+    for(int st=0;st < sizeof(float)* l.outputs*l.inputs;st++){ 
+            temp2[st] = weights_data[*pt]; 
+            (*pt)++;
+        }
+    memcpy(l.weights, temp2, sizeof(float)* l.outputs*l.inputs);
+    free(temp2);
+    if(transpose){
+        transpose_matrix(l.weights, l.inputs, l.outputs);
+    }
+    //printf("Biases: %f mean %f variance\n", mean_array(l.biases, l.outputs), variance_array(l.biases, l.outputs));
+    //printf("Weights: %f mean %f variance\n", mean_array(l.weights, l.outputs*l.inputs), variance_array(l.weights, l.outputs*l.inputs));
+    if (l.batch_normalize && (!l.dontloadscales)){
+        //fread(l.scales, sizeof(float), l.outputs, fp);
+        for(int st=0;st < sizeof(float)* l.outputs;st++){ 
+            temp[st] = weights_data[*pt]; 
+            (*pt)++;
+        }
+        memcpy(l.scales, temp, sizeof(float)* l.outputs);
+        //fread(l.rolling_mean, sizeof(float), l.outputs, fp);
+        for(int st=0;st < sizeof(float)* l.outputs;st++){ 
+            temp[st] = weights_data[*pt]; 
+            (*pt)++;
+        }
+        memcpy(l.rolling_mean, temp, sizeof(float)* l.outputs);
+        //fread(l.rolling_variance, sizeof(float), l.outputs, fp);
+        for(int st=0;st < sizeof(float)* l.outputs;st++){ 
+            temp[st] = weights_data[*pt]; 
+            (*pt)++;
+        }
+        memcpy(l.rolling_variance, temp, sizeof(float)* l.outputs);
+        //printf("Scales: %f mean %f variance\n", mean_array(l.scales, l.outputs), variance_array(l.scales, l.outputs));
+        //printf("rolling_mean: %f mean %f variance\n", mean_array(l.rolling_mean, l.outputs), variance_array(l.rolling_mean, l.outputs));
+        //printf("rolling_variance: %f mean %f variance\n", mean_array(l.rolling_variance, l.outputs), variance_array(l.rolling_variance, l.outputs));
+    }
+    free(temp);
+#ifdef GPU
+    if(gpu_index >= 0){
+        push_connected_layer(l);
+    }
+#endif
+}
+
+
+/*
+从buff读取全barch_norm层权重数据
+*/
+
+void load_batchnorm_weights_from_buff(layer l, char *weights_data, int *pt)
+{
+    //fread(l.scales, sizeof(float), l.c, fp);
+    //fread(l.rolling_mean, sizeof(float), l.c, fp);
+    //fread(l.rolling_variance, sizeof(float), l.c, fp);
+    char *temp = malloc(sizeof(float)* l.c);
+   
+    for(int st=0;st < sizeof(float)* l.c;st++){ 
+        temp[st] = weights_data[*pt]; 
+        (*pt)++;
+    }
+    memcpy(l.scales, temp, sizeof(float)* l.c);
+    for(int st=0;st < sizeof(float)* l.c;st++){ 
+        temp[st] = weights_data[*pt]; 
+        (*pt)++;
+    }
+    memcpy(l.rolling_mean, temp, sizeof(float)* l.c);
+    for(int st=0;st < sizeof(float)* l.c;st++){ 
+        temp[st] = weights_data[*pt]; 
+        (*pt)++;    
+    }
+    memcpy(l.rolling_variance, temp, sizeof(float)* l.c);
+
+    free(temp);
+    
+#ifdef GPU
+    if(gpu_index >= 0){
+        push_batchnorm_layer(l);
+    }
+#endif
+}
