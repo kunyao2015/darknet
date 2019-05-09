@@ -1,0 +1,7 @@
+Kitti 数据集 darknet 训练
+Car（小轿车），Van（面包车），Truck（卡车），Tram（电车），Pedestrain（行人），Person(sit-ting)（行人），Cyclist（骑行人），Misc（杂项）。还有一项DontCare为不关心的物体
+1. 使用modify_annotations_txt.py调整原来的8类为现在的3类
+2. 将原来KITTI标注的txt格式转换为PASCAL VOC的xml格式
+3. 将VOC格式的xml标签转换为darknet格式的标签xxx.txt
+4. kitti_train_val.py生成train.txt和val.txt 
+5. 还需要准备kitti.data、kitti.names和网络模型配置文件yolov3-kitti.cfg。
